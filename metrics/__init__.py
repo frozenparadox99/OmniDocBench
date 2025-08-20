@@ -9,7 +9,9 @@ __all__ = [
     "call_METEOR",
     "call_Edit_dist",
     "call_CDM",
-    "call_Move_dist"
+    "call_Move_dist",
+    "call_Kendall_Tau",
+    "call_CER"
 ]
 
 print('METRIC_REGISTRY: ', METRIC_REGISTRY.list_items())

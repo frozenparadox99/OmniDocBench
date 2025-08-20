@@ -103,8 +103,8 @@ class call_BLEU():
             for sample in samples:
                 gt = sample['norm_gt'] if sample.get('norm_gt') else sample['gt']
                 pred = sample['norm_pred'] if sample.get('norm_pred') else sample['pred']
-                predictions.append(gt)
-                references.append(pred)
+                predictions.append(pred)
+                references.append(gt)
             bleu = evaluate.load("bleu", keep_in_memory=True, experiment_id=random.randint(1,1e8))
             bleu_results = bleu.compute(predictions=predictions, references=references)
             result[group_name] = bleu_results["bleu"]
@@ -123,8 +123,8 @@ class call_METEOR():
             for sample in samples:
                 gt = sample['norm_gt'] if sample.get('norm_gt') else sample['gt']
                 pred = sample['norm_pred'] if sample.get('norm_pred') else sample['pred']
-                predictions.append(gt)
-                references.append(pred)
+                predictions.append(pred)
+                references.append(gt)
             meteor = evaluate.load('meteor', keep_in_memory=True, experiment_id=random.randint(1,1e8))
             meteor_results = meteor.compute(predictions=predictions, references=references)
             result[group_name] = meteor_results['meteor']
@@ -187,3 +187,85 @@ class call_CDM():
         with open(f'result/{save_name}_formula.json', 'w', encoding='utf-8') as f:
             json.dump(cdm_samples, f, indent=4, ensure_ascii=False)
         return self.samples, False
+
+@METRIC_REGISTRY.register("Kendall_Tau")
+class call_Kendall_Tau():
+    def __init__(self, samples):
+        self.samples = samples
+        
+    def evaluate(self, group_info=[], save_name='default'):
+        from scipy.stats import kendalltau
+        import numpy as np
+        
+        group_samples = get_groups(self.samples, group_info)
+        result = {}
+        
+        for group_name, samples in group_samples.items():
+            tau_scores = []
+            
+            for sample in samples:
+                gt = sample['norm_gt'] if sample.get('norm_gt') else sample['gt']
+                pred = sample['norm_pred'] if sample.get('norm_pred') else sample['pred']
+                
+                # Convert text to token sequences for ranking
+                # Handle both string and list inputs
+                if isinstance(gt, list):
+                    gt_tokens = gt
+                else:
+                    gt_tokens = gt.split() if gt else []
+                    
+                if isinstance(pred, list):
+                    pred_tokens = pred
+                else:
+                    pred_tokens = pred.split() if pred else []
+                
+                # Skip if either is empty
+                if len(gt_tokens) == 0 or len(pred_tokens) == 0:
+                    continue
+                
+                # Create ranking based on position in sequence
+                gt_ranks = list(range(len(gt_tokens)))
+                
+                # Find ranks of pred tokens in gt sequence
+                pred_ranks = []
+                for token in pred_tokens:
+                    if token in gt_tokens:
+                        # Use first occurrence position
+                        pred_ranks.append(gt_tokens.index(token))
+                    else:
+                        # Assign worst rank for missing tokens
+                        pred_ranks.append(len(gt_tokens))
+                
+                # Calculate Kendall's Tau if we have enough data
+                if len(pred_ranks) > 1:
+                    # Truncate to same length
+                    min_len = min(len(gt_ranks), len(pred_ranks))
+                    tau, p_value = kendalltau(gt_ranks[:min_len], pred_ranks[:min_len])
+                    
+                    # Handle nan values
+                    if not np.isnan(tau):
+                        tau_scores.append(tau)
+                        
+                        # Store individual score
+                        if not sample.get('metric'):
+                            sample['metric'] = {}
+                        sample['metric']['Kendall_Tau'] = tau
+            
+            # Calculate group average
+            if tau_scores:
+                result[group_name] = np.mean(tau_scores)
+            else:
+                result[group_name] = 0.0
+        
+        return self.samples, {'Kendall_Tau': result}
+
+@METRIC_REGISTRY.register("CER")
+class call_CER():
+    def evaluate(self, group_info=[], save_name='default'):
+        # CER = (S + D + I) / N
+        # S=substitutions, D=deletions, I=insertions, N=total chars
+        for sample in self.samples:
+            gt = sample['gt']
+            pred = sample['pred']
+            cer = Levenshtein.distance(pred, gt) / len(gt) if len(gt) > 0 else 0
+            sample['metric']['CER'] = cer
